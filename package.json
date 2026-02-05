@@ -1,0 +1,35 @@
+{
+  "name": "projet-sig-cameroun",
+  "version": "1.0.0",
+  "description": "Atlas Économique du Cameroun - Visualisation SIG des productions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:mock": "node server-mock.js",
+    "build": "node build.js",
+    "build:watch": "node build.js --watch",
+    "dev": "concurrently --kill-others \"npm run build:watch\" \"nodemon server-mock.js --watch server-mock.js --watch routes --watch services\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cameroun",
+    "sig",
+    "agriculture",
+    "elevage",
+    "peche",
+    "geojson",
+    "leaflet"
+  ],
+  "author": "Projet 5GI",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.27.2",
+    "nodemon": "^3.1.11"
+  }
+}
