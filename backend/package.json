@@ -1,7 +1,7 @@
 {
   "name": "atlas-economique-backend",
   "version": "1.0.0",
-  "description": "Atlas Economique du Cameroun - Express API Server",
+  "description": "E-Atlas - Express API Server",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

@@ -4,6 +4,7 @@ const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
 const apiRoutes = require('./routes/api');
+const swaggerDocs = swaggerJsdoc(swaggerOptions);
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -21,7 +22,7 @@ const swaggerOptions = {
   swaggerDefinition: {
     openapi: '3.0.0',
     info: {
-      title: 'Atlas Economique du Cameroun API',
+      title: 'E-Atlas',
       version: '1.0.0',
       description: 'API for Cameroon Economic Atlas, providing geographical and economic data.',
       contact: {
@@ -47,8 +48,18 @@ const swaggerOptions = {
   apis: ['./routes/*.js'] // Path to the API docs
 };
 
-const swaggerDocs = swaggerJsdoc(swaggerOptions);
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+const swaggerUiOptions = {
+  customCssUrl: 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.0.0/swagger-ui.min.css',
+  customJs: [
+    'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.0.0/swagger-ui-bundle.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.0.0/swagger-ui-standalone-preset.js',
+  ],
+  swaggerOptions: {
+    persistAuthorization: true,
+  }
+};
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs, swaggerUiOptions));
 
 // Enable CORS for all routes
 app.use(cors({
