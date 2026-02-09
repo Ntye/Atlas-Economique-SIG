@@ -24,7 +24,9 @@ import type {
   ActiveFilters,
   ProductsBySectorResponse, // Added this import
 } from '../interfaces';
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// const API_URL = import.meta.env.VITE_API_BASE_URL;
+// const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
+const API_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 
 class ApiService {
