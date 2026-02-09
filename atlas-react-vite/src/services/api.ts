@@ -24,7 +24,7 @@ import type {
   ActiveFilters,
   ProductsBySectorResponse, // Added this import
 } from '../interfaces';
-const API_URL = import.meta.env.VITE_API_URL || 'https://atlas-economique-sig-ziul.vercel.app/';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 
 class ApiService {

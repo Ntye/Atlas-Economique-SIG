@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "upload-data": "node db/upload_data.js"
+    "build": "npm install",
+    "seed": "node db/upload_data.js",
+    "postbuild": "npm run seed"
   },
   "dependencies": {
     "cors": "^2.8.5",

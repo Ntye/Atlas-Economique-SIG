@@ -1,0 +1,30 @@
+{
+  "products": [
+    {"id": "cacao", "nom": "Cacao", "unite": "tonnes", "icone": "🍫", "couleur": "#795548", "secteur": "agriculture"},
+    {"id": "cafe", "nom": "Café", "unite": "tonnes", "icone": "☕", "couleur": "#4E342E", "secteur": "agriculture"},
+    {"id": "bovins", "nom": "Bovins", "unite": "têtes", "icone": "🐄", "couleur": "#E65100", "secteur": "elevage"},
+    {"id": "peche", "nom": "Pêche", "unite": "tonnes", "icone": "🐟", "couleur": "#2196F3", "secteur": "peche"}
+  ],
+  "color_scales": [
+    {"theme": "cacao", "min": 0, "max": 0, "color": "#cccccc", "label": "Pas de production"},
+    {"theme": "cacao", "min": 1, "max": 100000, "color": "#795548", "label": "Élevé"},
+    {"theme": "default", "min": 0, "max": 0, "color": "#cccccc", "label": "Aucune donnée"}
+  ],
+  "app_config": {
+    "header": {
+      "titre": "Atlas Économique du Cameroun",
+      "sousTitre": "Analyse spatiale des secteurs",
+      "themes": [
+        {"id": "tous", "label": "Vue Administrative"},
+        {"id": "cacao", "label": "Agriculture : Cacao"}
+      ]
+    },
+    "footer": {
+      "credits": "© 2026 Projet 5GI - Polytechnique Yaoundé",
+      "sources": [{"nom": "MINADER", "url": "https://www.minader.cm"}]
+    },
+    "kpi_evolutions": {
+      "agriculture": 5.2, "elevage": 3.8, "peche": -2.1, "valeur_economique": 4.5
+    }
+  }
+}

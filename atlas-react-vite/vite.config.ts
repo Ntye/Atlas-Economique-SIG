@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         '/api': {
-          target: env.VITE_API_BASE_URL || 'https://atlas-economique-sig-ziul.vercel.app/',
+          target: env.VITE_API_BASE_URL || 'https://atlas-economique-sig-backend.vercel.app/',
           changeOrigin: true,
         },
       },
