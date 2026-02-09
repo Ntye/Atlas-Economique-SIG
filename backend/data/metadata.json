@@ -12,7 +12,7 @@
   ],
   "app_config": {
     "header": {
-      "titre": "Atlas Économique du Cameroun",
+      "titre": "CMR-EAtlas",
       "sousTitre": "Analyse spatiale des secteurs",
       "themes": [
         {"id": "tous", "label": "Vue Administrative"},

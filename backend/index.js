@@ -8,6 +8,14 @@ const apiRoutes = require('./routes/api');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Configuration CORS
+const allowedOrigins = [
+  'https://atlas-economique-sig-frontend.vercel.app', // Votre URL Vercel
+  'http://localhost:5173',                       // Pour le développement local
+  'http://localhost:3000'                        // Pour les tests locaux
+];
+
+
 // Swagger definition
 const swaggerOptions = {
   swaggerDefinition: {
@@ -23,6 +31,14 @@ const swaggerOptions = {
     },
     servers: [
       {
+        url: process.env.NODE_ENV === 'production'
+          ? `https://atlas-economique-sig-backend/api` // Remplacez par votre URL réelle
+          : `http://localhost:${port}/api`,
+        description: process.env.NODE_ENV === 'production' ? 'Serveur de Production' : 'Serveur local'
+      }
+    ],
+    servers: [
+      {
         url: `http://localhost:${port}/api`,
         description: 'Local development server'
       }
@@ -35,7 +51,11 @@ const swaggerDocs = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 // Enable CORS for all routes
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Middleware to parse JSON bodies
 app.use(express.json());
