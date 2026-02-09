@@ -1,50 +1,14 @@
-/**
- * Data Service - Traitement des données GeoJSON et mock data
- * Fournit toutes les méthodes nécessaires pour les endpoints API
- */
-
-const fs = require('fs');
-const path = require('path');
+const pool = require('../db');
 const {
-  productionRegions,
   produitsSecteurs,
   couleursSecteurs,
-  departementsData,
   echellesCouleur,
-  kpiData,
-  historiqueAnnuel,
+  kpiData, // Keep for now as some KPIs are aggregated mock data
+  historiqueAnnuel, // Keep for now, consider making dynamic later
   headerData,
   footerData,
   messagesEtats
-} = require('./mockData');
-
-// Chemins vers les fichiers GeoJSON
-const REGIONS_FILE = path.join(__dirname, '..', 'cameroun_regions.json');
-const DEPTS_FILE = path.join(__dirname, '..', 'cameroun_departements.json');
-
-// Cache pour les données GeoJSON
-let regionsGeoJSON = null;
-let departementsGeoJSON = null;
-
-// =================================================================
-// CHARGEMENT DES DONNÉES GEOJSON
-// =================================================================
-
-function loadRegionsGeoJSON() {
-  if (!regionsGeoJSON) {
-    const rawData = fs.readFileSync(REGIONS_FILE, 'utf8');
-    regionsGeoJSON = JSON.parse(rawData);
-  }
-  return regionsGeoJSON;
-}
-
-function loadDepartementsGeoJSON() {
-  if (!departementsGeoJSON) {
-    const rawData = fs.readFileSync(DEPTS_FILE, 'utf8');
-    departementsGeoJSON = JSON.parse(rawData);
-  }
-  return departementsGeoJSON;
-}
+} = require('./mockData'); // Still need mockData for products, colors, etc.
 
 // =================================================================
 // 1. MAIN MAP INTERFACE - Données cartographiques
@@ -52,106 +16,82 @@ function loadDepartementsGeoJSON() {
 
 /**
  * Récupère toutes les régions avec leurs données de production
+ * @returns {Promise<object>} GeoJSON FeatureCollection of regions with production data.
  */
-function getRegions() {
-  const geojson = loadRegionsGeoJSON();
+async function getRegions() {
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SELECT adm1_name1 AS nom, adm1_name AS nom_en, adm1_pcode AS code, area_sqkm AS superficie, center_lat, center_lon, geometry, production_details FROM regions');
+    
+    const regions = res.rows.map(row => ({
+      type: "Feature",
+      properties: {
+        nom: row.nom,
+        nom_en: row.nom_en,
+        code: row.code,
+        type_admin: 'region',
+        production: row.production_details,
+        centre_lat: row.center_lat,
+        centre_lon: row.center_lon,
+        superficie: row.superficie
+      },
+      geometry: row.geometry
+    }));
 
-  return {
-    type: "FeatureCollection",
-    features: geojson.features.map(feature => {
-      const nomRegion = feature.properties.adm1_name1;
-      const production = productionRegions[nomRegion] || { info: "Pas de données" };
+    return {
+      type: "FeatureCollection",
+      features: regions
+    };
+  } finally {
+    client.release();
+  }
+}
 
+/**
+ * Récupère tous les départements (filtrable par région) avec leurs données de production
+ * @param {string} regionFilter - Optional filter by region name (adm1_name1).
+ * @returns {Promise<object>} GeoJSON FeatureCollection of departments with production data.
+ */
+async function getDepartements(regionFilter = null) {
+  const client = await pool.connect();
+  try {
+    let query = 'SELECT adm2_name1 AS nom, adm1_name1 AS region_parente, adm2_pcode AS code, area_sqkm AS superficie, center_lat, center_lon, geometry, population FROM departements';
+    const params = [];
+
+    if (regionFilter) {
+      query += ' WHERE adm1_name1 = $1';
+      params.push(regionFilter);
+    }
+
+    const res = await client.query(query, params);
+
+    const departements = await Promise.all(res.rows.map(async row => {
+      const regionProd = await getRegionProductionDetails(row.region_parente);
+      const production = await generateDeptProduction(row.nom, row.region_parente, regionProd);
       return {
         type: "Feature",
         properties: {
-          nom: nomRegion,
-          nom_en: feature.properties.adm1_name,
-          code: feature.properties.adm1_pcode,
-          type_admin: 'region',
+          nom: row.nom,
+          region_parente: row.region_parente,
+          code: row.code,
+          type_admin: 'departement',
           production: production,
-          centre_lat: feature.properties.center_lat,
-          centre_lon: feature.properties.center_lon,
-          superficie: feature.properties.area_sqkm
+          population: row.population,
+          centre_lat: row.center_lat,
+          centre_lon: row.center_lon,
+          superficie: row.superficie
         },
-        geometry: feature.geometry
+        geometry: row.geometry
       };
-    })
-  };
-}
-
-/**
- * Récupère tous les départements avec leurs données de production
- */
-function getDepartements(regionFilter = null) {
-  const geojson = loadDepartementsGeoJSON();
-
-  let features = geojson.features.map(feature => {
-    const nomDept = feature.properties.adm2_name1 || feature.properties.adm2_name;
-    const nomRegion = feature.properties.adm1_name1 || feature.properties.adm1_name;
-
-    // Générer des données de production cohérentes basées sur la région parente
-    const regionProd = productionRegions[nomRegion] || {};
-    const production = generateDeptProduction(nomDept, nomRegion, regionProd);
+    }));
 
     return {
-      type: "Feature",
-      properties: {
-        nom: nomDept,
-        region_parente: nomRegion,
-        code: feature.properties.adm2_pcode,
-        type_admin: 'departement',
-        production: production,
-        centre_lat: feature.properties.center_lat,
-        centre_lon: feature.properties.center_lon,
-        superficie: feature.properties.area_sqkm
-      },
-      geometry: feature.geometry
+      type: "FeatureCollection",
+      features: departements
     };
-  });
-
-  // Filtrer par région si spécifié
-  if (regionFilter) {
-    features = features.filter(f => f.properties.region_parente === regionFilter);
+  } finally {
+    client.release();
   }
-
-  return {
-    type: "FeatureCollection",
-    features: features
-  };
-}
-
-/**
- * Génère des données de production pour un département basées sur sa région
- */
-function generateDeptProduction(nomDept, nomRegion, regionProd) {
-  // Seed basé sur le nom pour avoir des données cohérentes
-  const seed = hashString(nomDept);
-  const random = seededRandom(seed);
-
-  const production = {};
-
-  // Distribuer les productions de la région parmi ses départements
-  const deptList = departementsData[nomRegion] || [];
-  const nbDepts = deptList.length || 1;
-
-  for (const [produit, valeur] of Object.entries(regionProd)) {
-    if (produit === 'secteur_principal' || produit === 'valeur_economique') continue;
-
-    if (typeof valeur === 'number' && valeur > 0) {
-      // Variation de 50% à 150% de la moyenne
-      const moyenne = valeur / nbDepts;
-      const variation = 0.5 + random() * 1;
-      production[produit] = Math.floor(moyenne * variation);
-    }
-  }
-
-  // Ajouter la valeur économique estimée
-  production.valeur_economique = Math.floor(
-    (regionProd.valeur_economique || 1000000000) / nbDepts * (0.5 + random() * 1)
-  );
-
-  return production;
 }
 
 // =================================================================
@@ -161,46 +101,48 @@ function generateDeptProduction(nomDept, nomRegion, regionProd) {
 /**
  * Récupère toutes les options de filtrage
  */
-function getFilterOptions() {
-  const regions = loadRegionsGeoJSON();
-  const depts = loadDepartementsGeoJSON();
+async function getFilterOptions() {
+  const client = await pool.connect();
+  try {
+    const regionsRes = await client.query('SELECT DISTINCT adm1_name1 FROM regions ORDER BY adm1_name1');
+    const regions = regionsRes.rows.map(row => ({ id: row.adm1_name1, label: row.adm1_name1 }));
 
-  // Extraire les noms uniques
-  const regionNames = [...new Set(
-    regions.features.map(f => f.properties.adm1_name1)
-  )].sort();
+    const departementsRes = await client.query('SELECT adm2_name1, adm1_name1 FROM departements ORDER BY adm1_name1, adm2_name1');
+    const departementsByRegion = {};
+    departementsRes.rows.forEach(row => {
+      if (!departementsByRegion[row.adm1_name1]) {
+        departementsByRegion[row.adm1_name1] = [];
+      }
+      departementsByRegion[row.adm1_name1].push(row.adm2_name1);
+    });
 
-  const departementsByRegion = {};
-  depts.features.forEach(f => {
-    const region = f.properties.adm1_name1;
-    const dept = f.properties.adm2_name1;
-    if (!departementsByRegion[region]) {
-      departementsByRegion[region] = [];
-    }
-    departementsByRegion[region].push(dept);
-  });
-
-  // Trier les départements
-  for (const region of Object.keys(departementsByRegion)) {
-    departementsByRegion[region].sort();
+    return {
+      secteurs: [
+        { id: 'agriculture', label: 'Agriculture', icone: '🌾' },
+        { id: 'elevage', label: 'Élevage', icone: '🐄' },
+        { id: 'peche', label: 'Pêche', icone: '🦈' }
+      ],
+      couleursSecteurs: couleursSecteurs,
+      regions: regions,
+      departementsByRegion: departementsByRegion,
+      produits: produitsSecteurs,
+      themes: headerData.themes
+    };
+  } finally {
+    client.release();
   }
-
-  return {
-    secteurs: [
-      { id: 'agriculture', label: 'Agriculture', icone: '🌾' },
-      { id: 'elevage', label: 'Élevage', icone: '🐄' },
-      { id: 'peche', label: 'Pêche', icone: '🐟' }
-    ],
-    couleursSecteurs: couleursSecteurs,
-    regions: regionNames.map(nom => ({
-      id: nom,
-      label: nom
-    })),
-    departementsByRegion: departementsByRegion,
-    produits: produitsSecteurs,
-    themes: headerData.themes
-  };
 }
+
+/**
+ * Récupère les produits filtrés par secteur
+ */
+async function getProductsBySector(sectorId) {
+  if (sectorId === 'all') {
+    return produitsSecteurs; // Return all products grouped by sector
+  }
+  return { [sectorId]: produitsSecteurs[sectorId] || [] };
+}
+
 
 // =================================================================
 // 3. KPI DASHBOARD - Indicateurs clés
@@ -209,93 +151,113 @@ function getFilterOptions() {
 /**
  * Récupère les KPIs globaux ou filtrés
  */
-function getKPIs(filters = {}) {
-  const { secteur, region, produit } = filters;
+async function getKPIs(filters = {}) {
+  const client = await pool.connect();
+  try {
+    const { secteur, region, produit } = filters;
 
-  let agricultureTotal = 0;
-  let elevageTotal = 0;
-  let pecheTotal = 0;
-  let valeurTotal = 0;
-  let regionsActives = new Set();
-  let departementsActifs = 0;
+    let query = 'SELECT adm1_name1, production_details FROM regions';
+    const params = [];
 
-  const regionsToProcess = region
-    ? [region]
-    : Object.keys(productionRegions);
-
-  regionsToProcess.forEach(regionName => {
-    const prod = productionRegions[regionName];
-    if (!prod) return;
-
-    regionsActives.add(regionName);
-
-    // Agriculture
-    ['cacao', 'cafe', 'coton', 'manioc', 'mais', 'riz', 'banane', 'tomate',
-     'arachide', 'pomme_de_terre', 'huile_palme', 'hevea', 'the', 'oignon',
-     'mil', 'sorgho'].forEach(p => {
-      if (prod[p]) agricultureTotal += prod[p];
-    });
-
-    // Élevage
-    ['bovins', 'porc', 'ovins', 'caprins', 'volaille'].forEach(p => {
-      if (prod[p]) elevageTotal += prod[p];
-    });
-
-    // Pêche
-    ['peche', 'crevette', 'poisson_eau_douce'].forEach(p => {
-      if (prod[p]) pecheTotal += prod[p];
-    });
-
-    // Valeur économique
-    if (prod.valeur_economique) valeurTotal += prod.valeur_economique;
-
-    // Compter les départements
-    if (departementsData[regionName]) {
-      departementsActifs += departementsData[regionName].length;
+    if (region) {
+      query += ' WHERE adm1_name1 = $1';
+      params.push(region);
     }
-  });
 
-  return {
-    agriculture: {
-      label: 'Production Agricole',
-      valeur: agricultureTotal,
-      unite: 'tonnes',
-      icone: '🌾',
-      evolution: kpiData.agriculture.evolution
-    },
-    elevage: {
-      label: 'Cheptel Total',
-      valeur: elevageTotal,
-      unite: 'têtes',
-      icone: '🐄',
-      evolution: kpiData.elevage.evolution
-    },
-    peche: {
-      label: 'Production Halieutique',
-      valeur: pecheTotal,
-      unite: 'tonnes',
-      icone: '🐟',
-      evolution: kpiData.peche.evolution
-    },
-    valeur_economique: {
-      label: 'Valeur Économique',
-      valeur: valeurTotal,
-      unite: 'FCFA',
-      icone: '💰',
-      evolution: kpiData.valeur_economique.evolution
-    },
-    regions_actives: {
-      label: 'Régions Actives',
-      valeur: regionsActives.size,
-      icone: '📍'
-    },
-    departements_actifs: {
-      label: 'Départements',
-      valeur: departementsActifs,
-      icone: '🏛️'
-    },
-    annee: 2024
-  };
+    const res = await client.query(query, params);
+    const regionsData = res.rows; // [{ adm1_name1: 'RegionName', production_details: {...} }]
+
+    let agricultureTotal = 0;
+    let elevageTotal = 0;
+    let pecheTotal = 0;
+    let valeurTotal = 0;
+    let regionsActives = new Set();
+    let departementsActifs = 0;
+
+    // Fetch department count
+    let deptCountQuery = 'SELECT COUNT(*) FROM departements';
+    const deptCountParams = [];
+    if (region) {
+      deptCountQuery += ' WHERE adm1_name1 = $1';
+      deptCountParams.push(region);
+    }
+    const deptCountRes = await client.query(deptCountQuery, deptCountParams);
+    departementsActifs = parseInt(deptCountRes.rows[0].count, 10);
+
+
+    regionsData.forEach(row => {
+      const prod = row.production_details;
+      if (!prod) return;
+
+      regionsActives.add(row.adm1_name1);
+
+
+      // Agriculture
+      ['cacao', 'cafe', 'coton', 'manioc', 'mais', 'riz', 'banane', 'tomate',
+       'arachide', 'pomme_de_terre', 'huile_palme', 'hevea', 'the', 'oignon',
+       'mil', 'sorgho'].forEach(p => {
+        if (prod[p]) agricultureTotal += prod[p];
+      });
+
+      // Élevage
+      ['bovins', 'porc', 'ovins', 'caprins', 'volaille'].forEach(p => {
+        if (prod[p]) elevageTotal += prod[p];
+      });
+
+      // Pêche
+      ['peche', 'crevette', 'poisson_eau_douce'].forEach(p => {
+        if (prod[p]) pecheTotal += prod[p];
+      });
+
+      // Valeur économique
+      if (prod.valeur_economique) valeurTotal += prod.valeur_economique;
+    });
+
+
+    return {
+      agriculture: {
+        label: 'Production Agricole',
+        valeur: agricultureTotal,
+        unite: 'tonnes',
+        icone: '🌾',
+        evolution: kpiData.agriculture.evolution
+      },
+      elevage: {
+        label: 'Cheptel Total',
+        valeur: elevageTotal,
+        unite: 'têtes',
+        icone: '🐄',
+        evolution: kpiData.elevage.evolution
+      },
+      peche: {
+        label: 'Production Halieutique',
+        valeur: pecheTotal,
+        unite: 'tonnes',
+        icone: '🐟',
+        evolution: kpiData.peche.evolution
+      },
+      valeur_economique: {
+        label: 'Valeur Économique',
+        valeur: valeurTotal,
+        unite: 'FCFA',
+        icone: '💰',
+        evolution: kpiData.valeur_economique.evolution
+      },
+      regions_actives: {
+        label: 'Régions Actives',
+        valeur: regionsActives.size,
+        icone: '📍'
+      },
+      departements_actifs: {
+        label: 'Départements',
+        valeur: departementsActifs,
+        icone: '🏛️'
+      },
+      annee: 2024
+    };
+  } finally {
+    client.release();
+  }
 }
 
 // =================================================================
@@ -305,99 +267,122 @@ function getKPIs(filters = {}) {
 /**
  * Top 10 producteurs par produit
  */
-function getTop10Producers(produit = 'cacao') {
-  const producers = [];
+async function getTop10Producers(produit = 'cacao') {
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SELECT adm1_name1 AS nom, production_details FROM regions');
+    const producers = [];
 
-  Object.entries(productionRegions).forEach(([region, prod]) => {
-    if (prod[produit] && prod[produit] > 0) {
-      producers.push({
-        nom: region,
-        valeur: prod[produit],
-        type: 'region'
-      });
-    }
-  });
+    res.rows.forEach(row => {
+      const prod = row.production_details;
+      if (prod[produit] && prod[produit] > 0) {
+        producers.push({
+          nom: row.nom,
+          valeur: prod[produit],
+          type: 'region'
+        });
+      }
+    });
 
-  // Trier par valeur décroissante
-  producers.sort((a, b) => b.valeur - a.valeur);
+    // Trier par valeur décroissante
+    producers.sort((a, b) => b.valeur - a.valeur);
 
-  return producers.slice(0, 10);
+    return producers.slice(0, 10);
+  } finally {
+    client.release();
+  }
 }
 
 /**
  * Production par région (pour pie chart)
  */
-function getProductionByRegion(secteur = 'agriculture') {
-  const data = [];
-  const produits = produitsSecteurs[secteur] || produitsSecteurs.agriculture;
+async function getProductionByRegion(secteur = 'agriculture') {
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SELECT adm1_name1 AS nom, production_details FROM regions');
+    const data = [];
+    const produits = produitsSecteurs[secteur] || produitsSecteurs.agriculture;
 
-  Object.entries(productionRegions).forEach(([region, prod]) => {
-    let total = 0;
-    produits.forEach(p => {
-      if (prod[p.id]) total += prod[p.id];
+    res.rows.forEach(row => {
+      const prod = row.production_details;
+      let total = 0;
+      produits.forEach(p => {
+        if (prod[p.id]) total += prod[p.id];
+      });
+
+      if (total > 0) {
+        data.push({
+          nom: row.nom,
+          valeur: total,
+          pourcentage: 0 // Calculé après
+        });
+      }
     });
 
-    if (total > 0) {
-      data.push({
-        nom: region,
-        valeur: total,
-        pourcentage: 0 // Calculé après
-      });
-    }
-  });
+    // Calculer les pourcentages
+    const grandTotal = data.reduce((sum, d) => sum + d.valeur, 0);
+    data.forEach(d => {
+      d.pourcentage = Math.round((d.valeur / grandTotal) * 100 * 10) / 10;
+    });
 
-  // Calculer les pourcentages
-  const grandTotal = data.reduce((sum, d) => sum + d.valeur, 0);
-  data.forEach(d => {
-    d.pourcentage = Math.round((d.valeur / grandTotal) * 100 * 10) / 10;
-  });
-
-  return data.sort((a, b) => b.valeur - a.valeur);
+    return data.sort((a, b) => b.valeur - a.valeur);
+  } finally {
+    client.release();
+  }
 }
 
 /**
  * Distribution des produits
  */
-function getProductDistribution(region = null) {
-  const distribution = {};
+async function getProductDistribution(region = null) {
+  const client = await pool.connect();
+  try {
+    let query = 'SELECT production_details FROM regions';
+    const params = [];
+    if (region) {
+      query += ' WHERE adm1_name1 = $1';
+      params.push(region);
+    }
+    const res = await client.query(query, params);
+    const distribution = {};
 
-  const regionsToProcess = region
-    ? { [region]: productionRegions[region] }
-    : productionRegions;
+    res.rows.forEach(row => {
+      const prod = row.production_details;
+      if (!prod) return;
 
-  Object.values(regionsToProcess).forEach(prod => {
-    if (!prod) return;
+      Object.entries(prod).forEach(([produit, valeur]) => {
+        if (produit === 'secteur_principal' || produit === 'valeur_economique') return;
+        if (typeof valeur !== 'number') return;
 
-    Object.entries(prod).forEach(([produit, valeur]) => {
-      if (produit === 'secteur_principal' || produit === 'valeur_economique') return;
-      if (typeof valeur !== 'number') return;
-
-      if (!distribution[produit]) {
-        distribution[produit] = 0;
-      }
-      distribution[produit] += valeur;
+        if (!distribution[produit]) {
+          distribution[produit] = 0;
+        }
+        distribution[produit] += valeur;
+      });
     });
-  });
 
-  // Convertir en tableau et trier
-  return Object.entries(distribution)
-    .map(([produit, valeur]) => {
-      const produitInfo = findProductInfo(produit);
-      return {
-        id: produit,
-        nom: produitInfo?.nom || produit,
-        valeur: valeur,
-        icone: produitInfo?.icone || '📦',
-        couleur: produitInfo?.couleur || '#999999'
-      };
-    })
-    .sort((a, b) => b.valeur - a.valeur);
+    // Convertir en tableau et trier
+    return Object.entries(distribution)
+      .map(([produit, valeur]) => {
+        const produitInfo = findProductInfo(produit);
+        return {
+          id: produit,
+          nom: produitInfo?.nom || produit,
+          valeur: valeur,
+          icone: produitInfo?.icone || '📦',
+          couleur: produitInfo?.couleur || '#999999'
+        };
+      })
+      .sort((a, b) => b.valeur - a.valeur);
+  } finally {
+    client.release();
+  }
 }
 
 /**
  * Données temporelles pour graphiques de tendance
  */
-function getHistoricalData(secteur = 'all') {
+async function getHistoricalData(secteur = 'all') {
   if (secteur === 'all') {
     return historiqueAnnuel;
   }
@@ -415,94 +400,100 @@ function getHistoricalData(secteur = 'all') {
 /**
  * Détails d'une région
  */
-function getRegionDetails(nomRegion) {
-  const prod = productionRegions[nomRegion];
-  if (!prod) {
-    return { error: 'Région non trouvée' };
-  }
-
-  const depts = departementsData[nomRegion] || [];
-  const geojson = loadRegionsGeoJSON();
-  const feature = geojson.features.find(f => f.properties.adm1_name1 === nomRegion);
-
-  // Répartition par secteur
-  const agriculture = {};
-  const elevage = {};
-  const peche = {};
-
-  Object.entries(prod).forEach(([produit, valeur]) => {
-    if (produit === 'secteur_principal' || produit === 'valeur_economique') return;
-
-    const info = findProductInfo(produit);
-    if (!info) return;
-
-    const entry = { valeur, icone: info.icone, unite: info.unite };
-
-    if (produitsSecteurs.agriculture.find(p => p.id === produit)) {
-      agriculture[info.nom] = entry;
-    } else if (produitsSecteurs.elevage.find(p => p.id === produit)) {
-      elevage[info.nom] = entry;
-    } else if (produitsSecteurs.peche.find(p => p.id === produit)) {
-      peche[info.nom] = entry;
+async function getRegionDetails(nomRegion) {
+  const client = await pool.connect();
+  try {
+    const regionRes = await client.query('SELECT adm1_name1 AS nom, adm1_name AS nom_en, adm1_pcode AS code, area_sqkm AS superficie, center_lat, center_lon, production_details FROM regions WHERE adm1_name1 = $1', [nomRegion]);
+    if (regionRes.rows.length === 0) {
+      return { error: 'Région non trouvée' };
     }
-  });
+    const regionData = regionRes.rows[0];
 
-  return {
-    nom: nomRegion,
-    nom_en: feature?.properties.adm1_name,
-    code: feature?.properties.adm1_pcode,
-    type: 'region',
-    superficie: feature?.properties.area_sqkm,
-    centre: {
-      lat: feature?.properties.center_lat,
-      lon: feature?.properties.center_lon
-    },
-    secteur_principal: prod.secteur_principal,
-    valeur_economique: prod.valeur_economique,
-    production: {
-      agriculture,
-      elevage,
-      peche
-    },
-    departements: depts,
-    annee: 2024
-  };
+    const departementsRes = await client.query('SELECT adm2_name1 AS nom FROM departements WHERE adm1_name1 = $1 ORDER BY adm2_name1', [nomRegion]);
+    const departements = departementsRes.rows.map(row => row.nom);
+
+    const prod = regionData.production_details || {};
+
+    // Répartition par secteur
+    const agriculture = {};
+    const elevage = {};
+    const peche = {};
+
+    Object.entries(prod).forEach(([produit, valeur]) => {
+      if (produit === 'secteur_principal' || produit === 'valeur_economique') return;
+
+      const info = findProductInfo(produit);
+      if (!info) return;
+
+      const entry = { valeur, icone: info.icone, unite: info.unite };
+
+      if (produitsSecteurs.agriculture.find(p => p.id === produit)) {
+        agriculture[info.nom] = entry;
+      } else if (produitsSecteurs.elevage.find(p => p.id === produit)) {
+        elevage[info.nom] = entry;
+      } else if (produitsSecteurs.peche.find(p => p.id === produit)) {
+        peche[info.nom] = entry;
+      }
+    });
+
+    return {
+      nom: regionData.nom,
+      nom_en: regionData.nom_en,
+      code: regionData.code,
+      type: 'region',
+      superficie: regionData.superficie,
+      centre: {
+        lat: regionData.center_lat,
+        lon: regionData.center_lon
+      },
+      secteur_principal: prod.secteur_principal,
+      valeur_economique: prod.valeur_economique,
+      production: {
+        agriculture,
+        elevage,
+        peche
+      },
+      departements: departements,
+      annee: 2024
+    };
+  } finally {
+    client.release();
+  }
 }
 
 /**
  * Détails d'un département
  */
-function getDepartementDetails(nomDept) {
-  const geojson = loadDepartementsGeoJSON();
-  const feature = geojson.features.find(f =>
-    f.properties.adm2_name1 === nomDept || f.properties.adm2_name === nomDept
-  );
+async function getDepartementDetails(nomDept) {
+  const client = await pool.connect();
+  try {
+    const deptRes = await client.query('SELECT adm2_name1 AS nom, adm1_name1 AS region_parente, adm2_pcode AS code, area_sqkm AS superficie, center_lat, center_lon, population FROM departements WHERE adm2_name1 = $1', [nomDept]);
+    if (deptRes.rows.length === 0) {
+      return { error: 'Département non trouvé' };
+    }
+    const deptData = deptRes.rows[0];
 
-  if (!feature) {
-    return { error: 'Département non trouvé' };
+    const nomRegion = deptData.region_parente;
+    const regionProd = await getRegionProductionDetails(nomRegion);
+    const production = await generateDeptProduction(nomDept, nomRegion, regionProd);
+
+    return {
+      nom: deptData.nom,
+      region_parente: deptData.region_parente,
+      code: deptData.code,
+      type: 'departement',
+      superficie: deptData.superficie,
+      population: deptData.population,
+      centre: {
+        lat: deptData.center_lat,
+        lon: deptData.center_lon
+      },
+      production: production,
+      annee: 2024
+    };
+  } finally {
+    client.release();
   }
-
-  const nomRegion = feature.properties.adm1_name1;
-  const regionProd = productionRegions[nomRegion] || {};
-  const production = generateDeptProduction(nomDept, nomRegion, regionProd);
-
-  // Trouver la population
-  const deptInfo = departementsData[nomRegion]?.find(d => d.nom === nomDept);
-
-  return {
-    nom: nomDept,
-    region_parente: nomRegion,
-    code: feature.properties.adm2_pcode,
-    type: 'departement',
-    superficie: feature.properties.area_sqkm,
-    population: deptInfo?.population || null,
-    centre: {
-      lat: feature.properties.center_lat,
-      lon: feature.properties.center_lon
-    },
-    production: production,
-    annee: 2024
-  };
 }
 
 // =================================================================
@@ -545,60 +536,58 @@ function getLegend(theme = 'tous') {
 /**
  * Recherche dans les régions et départements
  */
-function search(query) {
+async function search(query) {
   if (!query || query.length < 2) {
     return { results: [], message: 'Entrez au moins 2 caractères' };
   }
 
   const results = [];
   const queryLower = query.toLowerCase();
+  const client = await pool.connect();
 
-  // Rechercher dans les régions
-  const regions = loadRegionsGeoJSON();
-  regions.features.forEach(f => {
-    const nom = f.properties.adm1_name1;
-    if (nom.toLowerCase().includes(queryLower)) {
+  try {
+    // Rechercher dans les régions
+    const regionsRes = await client.query('SELECT adm1_name1 AS nom, adm1_pcode AS code, center_lat, center_lon FROM regions WHERE LOWER(adm1_name1) LIKE $1', [`%${queryLower}%`]);
+    regionsRes.rows.forEach(row => {
       results.push({
         type: 'region',
-        nom: nom,
-        code: f.properties.adm1_pcode,
-        matchIndex: nom.toLowerCase().indexOf(queryLower),
+        nom: row.nom,
+        code: row.code,
+        matchIndex: row.nom.toLowerCase().indexOf(queryLower),
         centre: {
-          lat: f.properties.center_lat,
-          lon: f.properties.center_lon
+          lat: row.center_lat,
+          lon: row.center_lon
         }
       });
-    }
-  });
+    });
 
-  // Rechercher dans les départements
-  const depts = loadDepartementsGeoJSON();
-  depts.features.forEach(f => {
-    const nom = f.properties.adm2_name1;
-    const region = f.properties.adm1_name1;
-    if (nom && nom.toLowerCase().includes(queryLower)) {
+    // Rechercher dans les départements
+    const deptsRes = await client.query('SELECT adm2_name1 AS nom, adm1_name1 AS region_parente, adm2_pcode AS code, center_lat, center_lon FROM departements WHERE LOWER(adm2_name1) LIKE $1', [`%${queryLower}%`]);
+    deptsRes.rows.forEach(row => {
       results.push({
         type: 'departement',
-        nom: nom,
-        region_parente: region,
-        code: f.properties.adm2_pcode,
-        matchIndex: nom.toLowerCase().indexOf(queryLower),
+        nom: row.nom,
+        region_parente: row.region_parente,
+        code: row.code,
+        matchIndex: row.nom.toLowerCase().indexOf(queryLower),
         centre: {
-          lat: f.properties.center_lat,
-          lon: f.properties.center_lon
+          lat: row.center_lat,
+          lon: row.center_lon
         }
       });
-    }
-  });
+    });
 
-  // Trier par pertinence (match au début d'abord)
-  results.sort((a, b) => a.matchIndex - b.matchIndex);
+    // Trier par pertinence (match au début d'abord)
+    results.sort((a, b) => a.matchIndex - b.matchIndex);
 
-  return {
-    results: results,
-    count: results.length,
-    message: results.length === 0 ? 'Aucun résultat trouvé' : null
-  };
+    return {
+      results: results,
+      count: results.length,
+      message: results.length === 0 ? 'Aucun résultat trouvé' : null
+    };
+  } finally {
+    client.release();
+  }
 }
 
 // =================================================================
@@ -632,32 +621,35 @@ function getMessages() {
 /**
  * Compare plusieurs départements ou régions
  */
-function compare(ids, type = 'departement') {
+async function compare(ids, type = 'departement') {
   if (!ids || ids.length < 2) {
     return { error: 'Sélectionnez au moins 2 éléments à comparer' };
   }
 
-  const items = ids.map(id => {
+  const items = [];
+  for (const id of ids) {
     if (type === 'region') {
-      return getRegionDetails(id);
+      const details = await getRegionDetails(id);
+      if (!details.error) items.push(details);
     } else {
-      return getDepartementDetails(id);
+      const details = await getDepartementDetails(id);
+      if (!details.error) items.push(details);
     }
-  }).filter(item => !item.error);
-
+  }
+  
   if (items.length < 2) {
     return { error: 'Pas assez d\'éléments trouvés pour la comparaison' };
   }
 
-  // Trouver tous les produits communs
+  // This part now uses the fetched production data
   const allProducts = new Set();
   items.forEach(item => {
     if (item.production) {
-      if (type === 'region') {
+      if (type === 'region') { // For regions, production is already separated by sector
         Object.keys(item.production.agriculture || {}).forEach(p => allProducts.add(p));
         Object.keys(item.production.elevage || {}).forEach(p => allProducts.add(p));
         Object.keys(item.production.peche || {}).forEach(p => allProducts.add(p));
-      } else {
+      } else { // For departments, production is a flat object
         Object.keys(item.production).forEach(p => allProducts.add(p));
       }
     }
@@ -674,6 +666,66 @@ function compare(ids, type = 'departement') {
 // =================================================================
 // UTILITAIRES
 // =================================================================
+
+/**
+ * Helper function to get production_details for a region from the database
+ */
+async function getRegionProductionDetails(regionName) {
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SELECT production_details FROM regions WHERE adm1_name1 = $1', [regionName]);
+    return res.rows.length > 0 ? res.rows[0].production_details : {};
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Helper function to get department count for a region from the database
+ */
+async function getDepartmentCountForRegion(regionName) {
+  const client = await pool.connect();
+  try {
+    const res = await client.query('SELECT COUNT(*) FROM departements WHERE adm1_name1 = $1', [regionName]);
+    return parseInt(res.rows[0].count, 10);
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Génère des données de production pour un département basées sur sa région
+ */
+async function generateDeptProduction(nomDept, nomRegion, regionProd) {
+  const seed = hashString(nomDept);
+  const random = seededRandom(seed);
+
+  const production = {};
+
+  // Fetch the number of departments in the given region from the database
+  const nbDepts = await getDepartmentCountForRegion(nomRegion);
+
+  if (nbDepts === 0) return production; // Avoid division by zero
+
+  for (const [produit, valeur] of Object.entries(regionProd)) {
+    if (produit === 'secteur_principal' || produit === 'valeur_economique') continue;
+
+    if (typeof valeur === 'number' && valeur > 0) {
+      // Variation de 50% à 150% de la moyenne
+      const moyenne = valeur / nbDepts;
+      const variation = 0.5 + random() * 1;
+      production[produit] = Math.floor(moyenne * variation);
+    }
+  }
+
+  // Ajouter la valeur économique estimée
+  production.valeur_economique = Math.floor(
+    (regionProd.valeur_economique || 1000000000) / nbDepts * (0.5 + random() * 1)
+  );
+
+  return production;
+}
+
 
 /**
  * Hash simple pour générer un seed à partir d'une chaîne
@@ -721,6 +773,7 @@ module.exports = {
 
   // Filters
   getFilterOptions,
+  getProductsBySector,
 
   // KPIs
   getKPIs,

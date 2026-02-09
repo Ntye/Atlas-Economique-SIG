@@ -5,6 +5,7 @@ import KPIDashboard from './components/KPIDashboard';
 import MapView from './components/MapView';
 import Legend from './components/Legend';
 import Modal from './components/Modal';
+import HelpModal from './components/HelpModal';
 import Footer from './components/Footer';
 import { LoadingOverlay, ErrorMessage } from './components/LoadingOverlay';
 import { api } from './services/api';
@@ -20,6 +21,7 @@ import type {
 import './styles/variables.css';
 import './styles/main.css';
 import './styles/components.css';
+import Charts from "./components/Charts";
 
 function App() {
   // Application state
@@ -34,6 +36,8 @@ function App() {
   const [kpiFilters, setKpiFilters] = useState<Partial<ActiveFilters>>({});
 
   // Modal state
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalData, setModalData] = useState<LocationDetails | null>(null);
   const [comparisonResult, setComparisonResult] = useState<ComparisonData | null>(null);
@@ -72,9 +76,21 @@ function App() {
   }, [isModalOpen]);
 
   // Event handlers
-  const handleThemeChange = useCallback((theme: string) => {
-    setCurrentTheme(theme);
-    setCurrentSecteur('all');
+  // const handleThemeChange = useCallback((theme: string) => {
+  //   setCurrentTheme(theme);
+  //   setCurrentSecteur('all');
+  // }, []);
+  const handleThemeChange = useCallback((value: string) => {
+    if (value === 'tous') {
+      setCurrentTheme('tous');
+      setCurrentSecteur('all'); // Vue Administrative pure
+    } else if (['agriculture', 'elevage', 'peche'].includes(value)) {
+      setCurrentTheme('tous'); // On reste sur le mode "Secteur" (pas un produit spécifique comme cacao)
+      setCurrentSecteur(value); // On active la coloration par secteur
+    } else {
+      setCurrentTheme(value); // Cas pour un produit spécifique (ex: cacao)
+      setCurrentSecteur('all');
+    }
   }, []);
 
   const handleMenuToggle = useCallback(() => {
@@ -114,6 +130,7 @@ function App() {
   const handleFiltersApply = useCallback((newFilters: ActiveFilters) => {
     setFilters(newFilters);
     setKpiFilters(newFilters);
+    setIsStatsOpen(true); // Ouvre automatiquement le panneau de droite
 
     if (newFilters.produit && newFilters.produit !== 'all') {
       setCurrentTheme(newFilters.produit);
@@ -196,10 +213,13 @@ function App() {
       <LoadingOverlay isVisible={isLoading} message="Chargement de l'application..." />
 
       <Header
-        currentTheme={currentTheme}
+        currentTheme={currentSecteur !== 'all' ? currentSecteur : currentTheme}
         onThemeChange={handleThemeChange}
         onMenuToggle={handleMenuToggle}
         onSearchSelect={handleSearchSelect}
+        onHelpToggle={() => setIsHelpOpen(true)}
+        onStatsToggle={() => setIsStatsOpen(!isStatsOpen)}
+        isStatsActive={isStatsOpen}
       />
 
       <Sidebar
@@ -232,6 +252,21 @@ function App() {
         <Legend theme={currentTheme} secteur={currentSecteur} />
         <ErrorMessage isVisible={!!error} message={error || ''} onRetry={handleRetry} />
       </div>
+
+      <div className={`stats-panel ${isStatsOpen ? 'stats-panel--open' : ''}`}>
+        <div className="stats-panel__header">
+          <h3><i className="fas fa-chart-pie"></i> Statistiques Détaillées</h3>
+          <button className="stats-panel__close" onClick={() => setIsStatsOpen(false)}>&times;</button>
+        </div>
+        <div className="stats-panel__body">
+          <Charts filters={filters} />
+        </div>
+      </div>
+
+      <HelpModal
+          isOpen={isHelpOpen}
+          onClose={() => setIsHelpOpen(false)}
+      />
 
       <Modal
         isOpen={isModalOpen}

@@ -27,8 +27,8 @@ const SECTEUR_COLORS: Record<string, string> = {
 };
 
 const MAP_CONFIG = {
-  center: [7.3697, 12.3547] as [number, number],
-  zoom: 6,
+  center: [8.3697, 16.3547] as [number, number],
+  zoom: 5.5,
 };
 
 const MapView: FC<MapViewProps> = ({

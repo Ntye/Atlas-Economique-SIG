@@ -75,6 +75,10 @@ export interface ProduitsSecteurs {
   [key: string]: Produit[];
 }
 
+export interface ProductsBySectorResponse {
+  [sectorId: string]: Produit[];
+}
+
 export interface CouleurSecteur {
   couleur: string;
   label: string;

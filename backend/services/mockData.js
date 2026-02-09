@@ -312,7 +312,7 @@ const footerData = {
   ],
   derniereMAJ: '2026-01-16',
   contact: {
-    email: 'nty.nina@gmail.com',
+    email: 'ntye.nina@gmail.com',
     github: 'https://github.com/projet5gi'
   }
 };

@@ -33,13 +33,17 @@ const ComparisonPanel: FC<ComparisonPanelProps> = ({ items, onRemove, onClear, o
       <h3 className="comparison-panel__title">Comparaison</h3>
       <div className="comparison-panel__selection">
         {items.map((item, index) => (
-          <div key={`${item.nom}-${index}`} className="comparison-panel__item">
-            <input type="checkbox" checked disabled />
-            <span>{item.nom}</span>
-            <span className="remove" onClick={() => onRemove(index)}>
-              &times;
-            </span>
-          </div>
+            // src/components/ComparisonPanel/ComparisonPanel.tsx (extrait du map)
+
+            <div key={`${item.nom}-${index}`} className="comparison-panel__item">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="fas fa-location-dot" style={{ color: 'var(--color-secondary)', fontSize: '0.7rem' }}></i>
+                <span style={{ fontWeight: 500 }}>{item.nom}</span>
+              </div>
+              <span className="remove" onClick={() => onRemove(index)} title="Supprimer">
+                &times;
+              </span>
+            </div>
         ))}
       </div>
       <div className="comparison-panel__actions">

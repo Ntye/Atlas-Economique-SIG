@@ -1,8 +1,7 @@
 import { type FC, useEffect, useState, useCallback } from 'react';
 import { api } from '../../services/api';
-import Charts from '../Charts';
 import ComparisonPanel from '../ComparisonPanel';
-import type { FilterOptions, ActiveFilters, ComparisonItem, ComparisonData } from '../../interfaces';
+import type { FilterOptions, ActiveFilters, ComparisonItem, ComparisonData, Produit } from '../../interfaces';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -32,6 +31,8 @@ const Sidebar: FC<SidebarProps> = ({
   const [currentDept, setCurrentDept] = useState('all');
   const [currentSecteur, setCurrentSecteur] = useState('all');
   const [currentProduit, setCurrentProduit] = useState('all');
+  const [availableProduits, setAvailableProduits] = useState<Produit[]>([]);
+
 
   useEffect(() => {
     api
@@ -39,6 +40,30 @@ const Sidebar: FC<SidebarProps> = ({
       .then(setFilterOptions)
       .catch((err) => console.error('Sidebar init error:', err));
   }, []);
+
+  useEffect(() => {
+    const loadProducts = async () => {
+      try {
+        const productsBySector = await api.getProductsBySector(currentSecteur);
+        let products: Produit[] = [];
+        if (currentSecteur === 'all') {
+          // Flatten all products if 'all' sectors are selected
+          Object.values(productsBySector).forEach(prodArray => {
+            products = products.concat(prodArray);
+          });
+        } else {
+          products = productsBySector[currentSecteur] || [];
+        }
+        setAvailableProduits(products);
+        setCurrentProduit('all'); // Reset product selection when sector changes
+      } catch (error) {
+        console.error('Error loading products by sector:', error);
+        setAvailableProduits([]);
+      }
+    };
+
+    loadProducts();
+  }, [currentSecteur]);
 
   const handleRegionChange = useCallback(
     (region: string) => {
@@ -102,8 +127,12 @@ const Sidebar: FC<SidebarProps> = ({
   const activeChips: { type: string; label: string }[] = [];
   if (currentRegion !== 'all') activeChips.push({ type: 'region', label: `Region: ${currentRegion}` });
   if (currentDept !== 'all') activeChips.push({ type: 'dept', label: `Dept: ${currentDept}` });
-  if (currentSecteur !== 'all') activeChips.push({ type: 'secteur', label: `Secteur: ${currentSecteur}` });
-  if (currentProduit !== 'all') activeChips.push({ type: 'produit', label: `Produit: ${currentProduit}` });
+  if (currentSecteur !== 'all') activeChips.push({ type: 'secteur', label: `Secteur: ${
+    filterOptions?.secteurs.find(s => s.id === currentSecteur)?.label || currentSecteur
+  }` });
+  if (currentProduit !== 'all') activeChips.push({ type: 'produit', label: `Produit: ${
+    availableProduits.find(p => p.id === currentProduit)?.nom || currentProduit
+  }` });
 
   if (!filterOptions) return <aside className={`sidebar ${!isOpen ? 'sidebar--collapsed' : ''}`} />;
 
@@ -116,7 +145,7 @@ const Sidebar: FC<SidebarProps> = ({
         <div className="sidebar__filter-group">
           <label>Region</label>
           <select value={currentRegion} onChange={(e) => handleRegionChange(e.target.value)}>
-            <option value="all">-- Toutes les regions --</option>
+            <option value="all">Toutes les regions</option>
             {filterOptions.regions.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.label}
@@ -128,7 +157,7 @@ const Sidebar: FC<SidebarProps> = ({
         <div className="sidebar__filter-group">
           <label>Secteur d'activite</label>
           <select value={currentSecteur} onChange={(e) => setCurrentSecteur(e.target.value)}>
-            <option value="all">-- Tous les secteurs --</option>
+            <option value="all">Choisir</option>
             {filterOptions.secteurs.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.icone} {s.label}
@@ -144,7 +173,7 @@ const Sidebar: FC<SidebarProps> = ({
             onChange={(e) => handleDeptChange(e.target.value)}
             disabled={currentRegion === 'all'}
           >
-            <option value="all">-- Tous les departements --</option>
+            <option value="all">Choisir</option>
             {departments.map((d) => (
               <option key={d} value={d}>
                 {d}
@@ -156,24 +185,23 @@ const Sidebar: FC<SidebarProps> = ({
         <div className="sidebar__filter-group">
           <label>Produit</label>
           <select value={currentProduit} onChange={(e) => setCurrentProduit(e.target.value)}>
-            <option value="all">-- Tous les produits --</option>
-            {Object.entries(filterOptions.produits).map(([secteur, produits]) => (
-              <optgroup key={secteur} label={secteur.charAt(0).toUpperCase() + secteur.slice(1)}>
-                {produits.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.icone} {p.nom}
-                  </option>
-                ))}
-              </optgroup>
+            <option value="all">Choisir</option>
+            {availableProduits.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.icone} {p.nom}
+              </option>
             ))}
           </select>
         </div>
 
         <button className="btn btn-primary btn-block" onClick={applyFilters}>
+          <i className="fas fa-filter" style={{ marginRight: '8px' }}></i>
           Appliquer les filtres
         </button>
-        <button className="btn btn-danger btn-block" onClick={resetFilters} style={{ marginTop: '0.5rem' }}>
-          Reinitialiser
+
+        <button className="btn btn-danger btn-block" onClick={resetFilters} style={{ marginTop: '0.8rem' }}>
+          <i className="fas fa-undo" style={{ marginRight: '8px' }}></i>
+          Réinitialiser
         </button>
 
         {activeChips.length > 0 && (
@@ -190,11 +218,6 @@ const Sidebar: FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Charts Section */}
-      <div className="sidebar__section">
-        <h3 className="sidebar__section-title">Graphiques</h3>
-        <Charts produit={currentProduit !== 'all' ? currentProduit : 'cacao'} />
-      </div>
 
       {/* Comparison Panel */}
       <ComparisonPanel

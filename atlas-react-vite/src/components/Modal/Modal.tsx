@@ -3,7 +3,7 @@ import { formatNumber, capitalize } from '../../utils/helpers';
 import type {
   LocationDetails,
   ComparisonData,
-  RegionDetails,
+  RegionDetails, ComparisonItem,
 } from '../../interfaces';
 
 interface ModalProps {
@@ -155,61 +155,244 @@ const Modal: FC<ModalProps> = ({ isOpen, data, comparisonData, onClose, onAddToC
       </div>
     );
   };
-
   const renderComparisonContent = () => {
     if (!comparisonData?.items) return null;
 
+    // 1. Helper pour extraire les valeurs de production (Régions vs Dépts)
+    const getVal = (item: ComparisonItem, produitNom: string): number => {
+      if (!item.production) return 0;
+
+      if (item.type === 'region') {
+        const prod = item.production as any;
+        const secteurs = ['agriculture', 'elevage', 'peche'];
+        for (const s of secteurs) {
+          if (prod[s] && prod[s][produitNom]) {
+            return prod[s][produitNom].valeur || 0;
+          }
+        }
+      } else {
+        return (item.production as Record<string, number>)[produitNom] || 0;
+      }
+      return 0;
+    };
+
+    // 2. Calculer si on doit afficher la ligne de Valeur Économique
+    // On vérifie si au moins UN élément a une valeur > 0
+    const hasAnyEconomicValue = comparisonData.items.some(item => {
+      const val = (item.valeur_economique as number) ||
+          ((item.production as any)?.valeur_economique as number) || 0;
+      return val > 0;
+    });
+
     return (
-      <>
-        <div className="modal__header">
-          <h2 className="modal__title">Comparaison</h2>
-          <button className="modal__close" onClick={onClose}>
-            &times;
-          </button>
-        </div>
-        <div className="modal__body">
-          <div className="modal__section">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={{ border: '1px solid #ddd', padding: '8px' }}>Critere</th>
-                  {comparisonData.items.map((item) => (
-                    <th key={item.nom} style={{ border: '1px solid #ddd', padding: '8px' }}>
-                      {item.nom}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {comparisonData.produits.map((produit) => (
-                  <tr key={produit}>
-                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>{produit}</td>
-                    {comparisonData.items.map((item) => {
-                      const val =
-                        (item.production as Record<string, number> | undefined)?.[produit] || 0;
-                      return (
-                        <td
-                          key={item.nom}
-                          style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'right' }}
-                        >
-                          {formatNumber(val)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          <div className="modal__header">
+            <h2 className="modal__title">
+              Comparaison {comparisonData.type === 'region' ? 'Régionale' : 'Départementale'}
+            </h2>
+            <button className="modal__close" onClick={onClose}>
+              &times;
+            </button>
           </div>
-        </div>
-        <div className="modal__footer">
-          <button className="btn btn-danger" onClick={onClose}>
-            Fermer
-          </button>
-        </div>
-      </>
+          <div className="modal__body">
+            <div className="modal__section">
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '450px' }}>
+                  <thead>
+                  <tr style={{ background: 'var(--color-gray-100)' }}>
+                    <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Produit / Indicateur</th>
+                    {comparisonData.items.map((item) => (
+                        <th key={item.nom} style={{ border: '1px solid #ddd', padding: '12px' }}>
+                          {item.nom}
+                        </th>
+                    ))}
+                  </tr>
+                  </thead>
+                  <tbody>
+                  {/* Lignes de produits (Cacao, Café, etc.) */}
+                  {comparisonData.produits.map((produit) => (
+                      <tr key={produit}>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', fontWeight: 500 }}>
+                          {produit}
+                        </td>
+                        {comparisonData.items.map((item) => (
+                            <td
+                                key={item.nom}
+                                style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'right' }}
+                            >
+                              {formatNumber(getVal(item, produit))}
+                            </td>
+                        ))}
+                      </tr>
+                  ))}
+
+                  {/* Ligne Valeur Économique - AFFICHÉE UNIQUEMENT SI VALEUR > 0 */}
+                  {hasAnyEconomicValue && (
+                      <tr style={{ background: '#f0f7ff', fontWeight: 'bold' }}>
+                        <td style={{ border: '1px solid #ddd', padding: '10px' }}>Valeur Éco. (FCFA)</td>
+                        {comparisonData.items.map((item) => {
+                          const valEco = (item.valeur_economique as number) ||
+                              ((item.production as any)?.valeur_economique as number) || 0;
+                          return (
+                              <td key={item.nom} style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'right', color: 'var(--color-secondary)' }}>
+                                {formatNumber(valEco)}
+                              </td>
+                          );
+                        })}
+                      </tr>
+                  )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div className="modal__footer">
+            <button className="btn btn-danger" onClick={onClose}>
+              Fermer
+            </button>
+          </div>
+        </>
     );
   };
+  // const renderComparisonContent = () => {
+  //   if (!comparisonData?.items) return null;
+  //
+  //   // Fonction helper pour extraire la valeur numérique peu importe le type (Région ou Dépt)
+  //   const getVal = (item: ComparisonItem, produitNom: string): number => {
+  //     if (!item.production) return 0;
+  //
+  //     // Cas 1 : C'est un département (objet plat)
+  //     if (item.type === 'departement') {
+  //       return (item.production as Record<string, number>)[produitNom] || 0;
+  //     }
+  //
+  //     // Cas 2 : C'est une région (objet imbriqué par secteurs : agriculture, elevage, peche)
+  //     const prodReg = item.production as any;
+  //     const secteurs = ['agriculture', 'elevage', 'peche'];
+  //
+  //     for (const s of secteurs) {
+  //       if (prodReg[s] && prodReg[s][produitNom]) {
+  //         return prodReg[s][produitNom].valeur || 0;
+  //       }
+  //     }
+  //
+  //     return 0;
+  //   };
+  //
+  //   return (
+  //       <>
+  //         <div className="modal__header">
+  //           <h2 className="modal__title">Comparaison {comparisonData.type === 'region' ? 'Régionale' : 'Départementale'}</h2>
+  //           <button className="modal__close" onClick={onClose}>
+  //             &times;
+  //           </button>
+  //         </div>
+  //         <div className="modal__body">
+  //           <div className="modal__section">
+  //             <div style={{ overflowX: 'auto' }}>
+  //               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '400px' }}>
+  //                 <thead>
+  //                 <tr style={{ background: 'var(--color-gray-100)' }}>
+  //                   <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Produit / Critère</th>
+  //                   {comparisonData.items.map((item) => (
+  //                       <th key={item.nom} style={{ border: '1px solid #ddd', padding: '12px' }}>
+  //                         {item.nom}
+  //                       </th>
+  //                   ))}
+  //                 </tr>
+  //                 </thead>
+  //                 <tbody>
+  //                 {comparisonData.produits.map((produit) => (
+  //                     <tr key={produit}>
+  //                       <td style={{ border: '1px solid #ddd', padding: '10px', fontWeight: 500 }}>
+  //                         {produit}
+  //                       </td>
+  //                       {comparisonData.items.map((item) => (
+  //                           <td
+  //                               key={item.nom}
+  //                               style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'right' }}
+  //                           >
+  //                             {formatNumber(getVal(item, produit))}
+  //                           </td>
+  //                       ))}
+  //                     </tr>
+  //                 ))}
+  //                 {/* Ajout de la valeur économique si disponible */}
+  //                 <tr style={{ background: '#f9f9f9', fontWeight: 'bold' }}>
+  //                   <td style={{ border: '1px solid #ddd', padding: '10px' }}>Valeur Éco. (FCFA)</td>
+  //                   {comparisonData.items.map((item) => (
+  //                       <td key={item.nom} style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'right', color: 'var(--color-secondary)' }}>
+  //                         {formatNumber(item.valeur_economique as number || 0)}
+  //                       </td>
+  //                   ))}
+  //                 </tr>
+  //                 </tbody>
+  //               </table>
+  //             </div>
+  //           </div>
+  //         </div>
+  //         <div className="modal__footer">
+  //           <button className="btn btn-danger" onClick={onClose}>
+  //             Fermer
+  //           </button>
+  //         </div>
+  //       </>
+  //   );
+  // };
+  // const renderComparisonContent = () => {
+  //   if (!comparisonData?.items) return null;
+  //
+  //   return (
+  //     <>
+  //       <div className="modal__header">
+  //         <h2 className="modal__title">Comparaison</h2>
+  //         <button className="modal__close" onClick={onClose}>
+  //           &times;
+  //         </button>
+  //       </div>
+  //       <div className="modal__body">
+  //         <div className="modal__section">
+  //           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+  //             <thead>
+  //               <tr>
+  //                 <th style={{ border: '1px solid #ddd', padding: '8px' }}>Critere</th>
+  //                 {comparisonData.items.map((item) => (
+  //                   <th key={item.nom} style={{ border: '1px solid #ddd', padding: '8px' }}>
+  //                     {item.nom}
+  //                   </th>
+  //                 ))}
+  //               </tr>
+  //             </thead>
+  //             <tbody>
+  //               {comparisonData.produits.map((produit) => (
+  //                 <tr key={produit}>
+  //                   <td style={{ border: '1px solid #ddd', padding: '8px' }}>{produit}</td>
+  //                   {comparisonData.items.map((item) => {
+  //                     const val =
+  //                       (item.production as Record<string, number> | undefined)?.[produit] || 0;
+  //                     return (
+  //                       <td
+  //                         key={item.nom}
+  //                         style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'right' }}
+  //                       >
+  //                         {formatNumber(val)}
+  //                       </td>
+  //                     );
+  //                   })}
+  //                 </tr>
+  //               ))}
+  //             </tbody>
+  //           </table>
+  //         </div>
+  //       </div>
+  //       <div className="modal__footer">
+  //         <button className="btn btn-danger" onClick={onClose}>
+  //           Fermer
+  //         </button>
+  //       </div>
+  //     </>
+  //   );
+  // };
 
   return (
     <div

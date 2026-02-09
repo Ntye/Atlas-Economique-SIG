@@ -22,6 +22,7 @@ import type {
   ComparisonData,
   HealthCheck,
   ActiveFilters,
+  ProductsBySectorResponse, // Added this import
 } from '../interfaces';
 
 const API_BASE = '/api';
@@ -62,6 +63,10 @@ class ApiService {
 
   async getFilters(): Promise<FilterOptions> {
     return this.request('/filters');
+  }
+
+  async getProductsBySector(secteur: string): Promise<ProductsBySectorResponse> {
+    return this.request(`/products-by-sector/${encodeURIComponent(secteur)}`);
   }
 
   // =====================
